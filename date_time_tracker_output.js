@@ -1,4 +1,2 @@
-const modifier = (text) => {
-    return TLOutput(text);
-};
+const modifier = (text) => TLOutput(text);
 modifier(text);

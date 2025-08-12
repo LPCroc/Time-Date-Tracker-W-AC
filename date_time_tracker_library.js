@@ -1,425 +1,139 @@
-// library.js (Continue advances; Retry/Erase suppressed; manual-jump; updated day-part windows)
+// date_time_tracker_library.js  — DTT 1.4.2 (input-only display)
 (function () {
-  const VERSION = "TimeLib 1.3.1 (continue-advance + retry-guard)";
-  const DAY_START_MINUTES = 8 * 60;   // 08:00
-  const MINUTES_PER_DAY   = 24 * 60;
-  const DEFAULT_RATE_MIN  = 10;
+  const KEY_TIME='timeAndDay',TITLE_TIME='Time and Day',TYPE_TIME='Time and Day';
+  const MIN_PER_DAY=1440, DAY_START_MINUTES=8*60, DEFAULT_RATE_MIN=10;
 
-  function init(state) {
-    if (!state || typeof state !== 'object') return;
-    if (typeof state.clockMinutes !== 'number') state.clockMinutes = DAY_START_MINUTES;
-    if (typeof state.dayNumber !== 'number') state.dayNumber = 1;
-    if (typeof state.minutesPerAction !== 'number') state.minutesPerAction = DEFAULT_RATE_MIN;
-    if (!state._time) state._time = { history:{}, lastSeen:-1, lastInputSeen:-1 };
-    if (typeof state._suppressNextAdvance !== 'boolean') state._suppressNextAdvance = false;
+  const pad2=n=>String(n).padStart(2,'0');
+  const formatHHMM=mins=>`${pad2(Math.floor(mins/60))}:${pad2(mins%60)}`;
+  const to12h=(h24,m)=>`${(h24%12)||12}:${pad2(m)}${h24>=12?'pm':'am'}`;
+  const phaseFor=mins=> (mins>=360&&mins<720)?'Morning':(mins<1020)?'Afternoon':(mins<1200)?'Evening':'Night';
+  const esc=s=>s.replace(/[-/\\^$*+?.()|[\]{}]/g,'\\$&');
+  const parseBoolLine=(raw,label,def)=>{const m=new RegExp(esc(label)+'\\s*:\\s*(true|false)','i').exec(raw||'');return m?m[1].toLowerCase()==='true':def;};
+  const parseNumberLine=(raw,label,def)=>{const m=new RegExp(esc(label)+'\\s*:\\s*(\\d{1,3})','i').exec(raw||'');if(!m)return def;const n=+m[1];return Number.isNaN(n)?def:Math.max(1,Math.min(180,n));};
+
+  function init(state){
+    if(!state||typeof state!=='object')return;
+    if(typeof state.clockMinutes!=='number') state.clockMinutes=DAY_START_MINUTES;
+    if(typeof state.dayNumber!=='number') state.dayNumber=1;
+    if(typeof state.minutesPerAction!=='number') state.minutesPerAction=DEFAULT_RATE_MIN;
+    if(!state._dtt) state._dtt={history:{},lastSeen:-1,lastInputSeen:-1};
+    if(typeof state._suppressNextAdvance!=='boolean') state._suppressNextAdvance=false;
   }
-
-  function setRateFromCard(state, storyCards) {
-    try {
-      const list = Array.isArray(storyCards) ? storyCards : [];
-      const card = list.find(c => c && (c.key === 'actionRate' || c.keys === 'actionRate'));
-      const entry = card && (typeof card.entry === 'string') ? card.entry : (typeof card.value === 'string' ? card.value : '');
-      if (!entry) return;
-      const m = entry.match(/\b(\d{1,3})\b/);
-      if (m) state.minutesPerAction = Math.max(1, Math.min(180, parseInt(m[1],10)));
-    } catch {}
+  function getTurnId(info,state){ if(info&&typeof info.actionCount==='number') return info.actionCount; state._dtt._fallbackTid=(state._dtt._fallbackTid||0)+1; return state._dtt._fallbackTid; }
+  function addMinutes(state,delta){
+    const before=state.clockMinutes; let cur=before+delta, wrapped=false;
+    if(cur>=MIN_PER_DAY){cur%=MIN_PER_DAY; wrapped=true;}
+    if(cur<0){cur=((cur%MIN_PER_DAY)+MIN_PER_DAY)%MIN_PER_DAY; wrapped=true;}
+    state.clockMinutes=cur; if(wrapped) state.dayNumber=(state.dayNumber||1)+1;
+    return {before,after:cur,wrapped};
   }
+  function display(state){ return { timeStr:formatHHMM(state.clockMinutes), phase:phaseFor(state.clockMinutes), dayNum:state.dayNumber||1 }; }
 
-  function addMinutes(state, delta) {
-    const before = state.clockMinutes;
-    let cur = before + delta;
-    let wrapped = false;
-    if (cur >= MINUTES_PER_DAY) { cur = cur % MINUTES_PER_DAY; wrapped = true; }
-    if (cur < 0) { cur = ((cur % MINUTES_PER_DAY) + MINUTES_PER_DAY) % MINUTES_PER_DAY; wrapped = true; }
-    state.clockMinutes = cur;
-    if (wrapped) state.dayNumber = (state.dayNumber || 1) + 1;
-    return { before, after: cur, wrapped };
+  function findTimeCardIndex(storyCards){
+    const list=Array.isArray(storyCards)?storyCards:[]; for(let i=0;i<list.length;i++){const c=list[i]; if(c&&(c.key===KEY_TIME||c.keys===KEY_TIME)) return i;} return -1;
   }
-
-  function format(mins) {
-    const h = Math.floor(mins / 60);
-    const m = mins % 60;
-    const pad = (n)=>String(n).padStart(2,'0');
-    return `${pad(h)}:${pad(m)}`;
+  function ensureTimeCard(state,storyCards,showLine,lockLine,hideLine,rate,d){
+    state._cards=state._cards||{}; state._cards[KEY_TIME]=state._cards[KEY_TIME]||{idx:-1,created:false}; const reg=state._cards[KEY_TIME];
+    const entry=
+`Time: ${d.timeStr} (${d.phase}), Day #: ${d.dayNum}
+Display Time: ${showLine}
+Lock Prose Time: ${lockLine}
+Hide Prose Time: ${hideLine}
+Minutes per action: ${rate}`;
+    const notes=`Type "sleep till next morning" in a Do action → time jumps to 08:00am next day.`;
+    const list=Array.isArray(storyCards)?storyCards:[]; const idx=(reg.idx>=0)?reg.idx:findTimeCardIndex(list);
+    if(idx>=0&&typeof updateStoryCard==='function'){ try{ updateStoryCard(idx,KEY_TIME,entry,TYPE_TIME,TITLE_TIME,notes); reg.idx=idx; reg.created=true; }catch{} }
+    else if(!reg.created&&typeof addStoryCard==='function'){ try{ addStoryCard(KEY_TIME,entry,TYPE_TIME,TITLE_TIME,notes); reg.created=true; reg.idx=findTimeCardIndex(list);}catch{} }
   }
-
-  // UPDATED DAY-PART WINDOWS:
-  // Morning:   06:00–11:59
-  // Afternoon: 12:00–16:59
-  // Evening:   17:00–19:59
-  // Night:     20:00–05:59  (wraps through midnight)
-  function phaseFor(mins) {
-    if (mins >= 6*60 && mins < 12*60) return 'Morning';
-    if (mins >= 12*60 && mins < 17*60) return 'Afternoon';
-    if (mins >= 17*60 && mins < 20*60) return 'Evening';
-    return 'Night'; // 20:00–23:59 and 00:00–05:59
+  function readSettings(state,storyCards){
+    let show = (typeof state.displayTimeEnabled==='boolean')?state.displayTimeEnabled:true;
+    let lock = (typeof state.lockProseTime==='boolean')?state.lockProseTime:true;
+    let hide = (typeof state.hideProseTime==='boolean')?state.hideProseTime:false;
+    let rate = (typeof state.minutesPerAction==='number')?state.minutesPerAction:DEFAULT_RATE_MIN;
+    const list=Array.isArray(storyCards)?storyCards:[]; const idx=findTimeCardIndex(list); const card=(idx>=0)?list[idx]:null;
+    const raw=card?(typeof card.entry==='string'?card.entry:(typeof card.value==='string'?card.value:'')):'';
+    if(raw){ show=parseBoolLine(raw,'Display Time',show); lock=parseBoolLine(raw,'Lock Prose Time',lock); hide=parseBoolLine(raw,'Hide Prose Time',hide); rate=parseNumberLine(raw,'Minutes per action',rate); }
+    state.displayTimeEnabled=show; state.lockProseTime=lock; state.hideProseTime=hide; state.minutesPerAction=rate;
+    return {show,lockProse:lock,hideProse:hide,rate};
   }
-
-  function display(state) {
-    const timeStr = format(state.clockMinutes);
-    return { timeStr, phase: phaseFor(state.clockMinutes), dayNum: state.dayNumber || 1 };
-  }
-
-  function getTurnId(info, state) {
-    if (info && typeof info.actionCount === 'number') return info.actionCount;
-    state._time._fallbackTid = (state._time._fallbackTid || 0) + 1;
-    return state._time._fallbackTid;
-  }
-
-  // Adopt manual edits from Time & Day card for this turn
-  function applyManualFromCard(state, info, storyCards) {
-    try {
-      const list = Array.isArray(storyCards) ? storyCards : [];
-      const card = list.find(c => c && (c.key === 'timeAndDay' || c.keys === 'timeAndDay'));
-      const txt = card && (typeof card.entry === 'string' ? card.entry : (typeof card.value === 'string' ? card.value : ''));
-      if (!txt) return false;
-
-      const tm = /Time:\s*(\d{1,2}):(\d{2})/i.exec(txt);
-      const dy = /Day\s*#:\s*(\d+)/i.exec(txt);
-
-      const beforeMin = state.clockMinutes;
-      const beforeDay = state.dayNumber;
-
-      let changed = false, afterMin = beforeMin, afterDay = beforeDay;
-
-      if (tm) {
-        const hh = parseInt(tm[1],10), mm = parseInt(tm[2],10);
-        const mins = (isNaN(hh)||isNaN(mm)) ? null : (hh*60 + mm);
-        if (mins != null && mins !== state.clockMinutes) { afterMin = mins; changed = true; }
-      }
-      if (dy) {
-        const d = parseInt(dy[1],10);
-        if (!isNaN(d) && d !== state.dayNumber) { afterDay = d; changed = true; }
-      }
-
-      if (changed) {
-        state.clockMinutes = afterMin;
-        state.dayNumber    = afterDay;
-        state._manualPending = true;
-        state._manualJump = { fromMin: beforeMin, fromDay: beforeDay, toMin: afterMin, toDay: afterDay };
-      }
+  function applyManualFromCard(state,storyCards){
+    try{
+      const list=Array.isArray(storyCards)?storyCards:[]; const idx=findTimeCardIndex(list); if(idx<0) return false;
+      const card=list[idx]; const txt=(typeof card.entry==='string')?card.entry:(typeof card.value==='string'?card.value:''); if(!txt) return false;
+      const tm=/Time:\s*(\d{1,2}):(\d{2})/i.exec(txt), dy=/Day\s*#:\s*(\d+)/i.exec(txt);
+      const beforeMin=state.clockMinutes, beforeDay=state.dayNumber; let changed=false, afterMin=beforeMin, afterDay=beforeDay;
+      if(tm){ const hh=+tm[1], mm=+tm[2]; const mins=(Number.isNaN(hh)||Number.isNaN(mm))?null:(hh*60+mm); if(mins!=null&&mins!==state.clockMinutes){afterMin=mins; changed=true;} }
+      if(dy){ const d=+dy[1]; if(!Number.isNaN(d)&&d!==state.dayNumber){afterDay=d; changed=true;} }
+      if(changed){ state.clockMinutes=afterMin; state.dayNumber=afterDay; state._manualPending=true; state._manualJump={fromMin:beforeMin,fromDay:beforeDay,toMin:afterMin,toDay:afterDay}; }
       return changed;
-    } catch { return false; }
+    }catch{ return false; }
+  }
+  function maybeSleepCommand(state,text){
+    try{
+      const re=/\b(sleep|nap|rest)\s+(till|until)\s+(next\s+)?(morning|day)\b/i; const m=re.exec(text||''); if(!m) return {text, slept:false};
+      const bM=state.clockMinutes, bD=state.dayNumber; state.dayNumber=(state.dayNumber||1)+1; state.clockMinutes=8*60;
+      state._manualPending=true; state._manualJump={fromMin:bM,fromDay:bD,toMin:state.clockMinutes,toDay:state.dayNumber};
+      const stripped=(text||'').replace(re,'').trim(); return {text: stripped.length?stripped:"You go to sleep.", slept:true};
+    }catch{ return {text, slept:false}; }
   }
 
-  // Player input (Do/Say/Story) advances
-  function handlePlayerInputTurn(state, info) {
-    init(state);
-    const tid = getTurnId(info, state);
-
-    if (tid <= state._time.lastInputSeen) {
-      return { tid, ticked:false, reason:'dup-input' };
-    }
-
-    if (state._manualPending) {
-      const jump = state._manualJump || null;
-      state._time.history[tid] = { after: state.clockMinutes, day: state.dayNumber, reason:'manual', jump };
-      state._time.lastSeen = Math.max(state._time.lastSeen, tid);
-      state._time.lastInputSeen = tid;
-      state._manualPending = false;
-      return { tid, ticked:false, reason:'manual', jump };
-    }
-
-    const span = addMinutes(state, state.minutesPerAction);
-    state._time.history[tid] = { after: state.clockMinutes, day: state.dayNumber, reason:'advance-input' };
-    state._time.lastSeen = Math.max(state._time.lastSeen, tid);
-    state._time.lastInputSeen = tid;
-    return { tid, ticked:true, reason:'advance-input', added: state.minutesPerAction, before: span.before, after: span.after };
+  function handlePlayerInputTurn(state,info){
+    init(state); const tid=getTurnId(info,state);
+    if(tid<=state._dtt.lastInputSeen) return {tid,ticked:false,reason:'dup-input'};
+    if(state._manualPending){ const j=state._manualJump||null; state._dtt.history[tid]={after:state.clockMinutes,day:state.dayNumber,reason:'manual',jump:j};
+      state._dtt.lastSeen=Math.max(state._dtt.lastSeen,tid); state._dtt.lastInputSeen=tid; state._manualPending=false; return {tid,ticked:false,reason:'manual',jump:j}; }
+    const span=addMinutes(state,state.minutesPerAction);
+    state._dtt.history[tid]={after:state.clockMinutes,day:state.dayNumber,reason:'advance-input'};
+    state._dtt.lastSeen=Math.max(state._dtt.lastSeen,tid); state._dtt.lastInputSeen=tid;
+    return {tid,ticked:true,reason:'advance-input',added:state.minutesPerAction,before:span.before,after:span.after};
+  }
+  function handleViewTurn(state,info){
+    init(state); const tid=getTurnId(info,state), last=state._dtt.lastSeen;
+    if(state._manualPending){ const j=state._manualJump||null; state._dtt.history[tid]={after:state.clockMinutes,day:state.dayNumber,reason:'manual',jump:j};
+      state._dtt.lastSeen=Math.max(state._dtt.lastSeen,tid); state._manualPending=false; return {tid,ticked:false,reason:'manual',jump:j}; }
+    if(tid<last){ state._suppressNextAdvance=true; if(state._dtt&&state._dtt.history){ Object.keys(state._dtt.history).forEach(k=>{if(+k>tid) delete state._dtt.history[k];}); }
+      state._dtt.lastSeen=tid; return {tid,ticked:false,reason:'rewind'}; }
+    if(tid===last) return {tid,ticked:false,reason:'same'};
+    if(state._suppressNextAdvance){ state._suppressNextAdvance=false; state._dtt.history[tid]={after:state.clockMinutes,day:state.dayNumber,reason:'retry-suppress'};
+      state._dtt.lastSeen=tid; return {tid,ticked:false,reason:'retry-suppress'}; }
+    const span=addMinutes(state,state.minutesPerAction);
+    state._dtt.history[tid]={after:state.clockMinutes,day:state.dayNumber,reason:'advance-continue'};
+    state._dtt.lastSeen=tid; return {tid,ticked:true,reason:'advance-continue',added:state.minutesPerAction,before:span.before,after:span.after};
   }
 
-  // Continue/Retry/Erase are handled here (no player text)
-  function handleViewTurn(state, info) {
-    init(state);
-    const tid  = getTurnId(info, state);
-    const last = state._time.lastSeen;
-
-    if (state._manualPending) {
-      const jump = state._manualJump || null;
-      state._time.history[tid] = { after: state.clockMinutes, day: state.dayNumber, reason:'manual', jump };
-      state._time.lastSeen = Math.max(state._time.lastSeen, tid);
-      state._manualPending = false;
-      return { tid, ticked:false, reason:'manual', jump };
-    }
-
-    // Retry/Erase detected → never tick next view turn
-    if (tid < last) {
-      state._suppressNextAdvance = true;
-      if (state._time && state._time.history) {
-        Object.keys(state._time.history).forEach(k => { if (+k > tid) delete state._time.history[k]; });
-      }
-      state._time.lastSeen = tid;
-      return { tid, ticked:false, reason:'rewind' };
-    }
-
-    if (tid === last) {
-      return { tid, ticked:false, reason:'same' };
-    }
-
-    // New view turn → Continue or Retry’s +1 variant
-    if (state._suppressNextAdvance) {
-      state._suppressNextAdvance = false;
-      state._time.history[tid] = { after: state.clockMinutes, day: state.dayNumber, reason:'retry-suppress' };
-      state._time.lastSeen = tid;
-      return { tid, ticked:false, reason:'retry-suppress' };
-    }
-
-    // Continue advances
-    const span = addMinutes(state, state.minutesPerAction);
-    state._time.history[tid] = { after: state.clockMinutes, day: state.dayNumber, reason:'advance-continue' };
-    state._time.lastSeen = tid;
-    return { tid, ticked:true, reason:'advance-continue', added: state.minutesPerAction, before: span.before, after: span.after };
-  }
-
-  // Export
-  globalThis.TimeLib = {
-    VERSION,
-    init,
-    setRateFromCard,
-    addMinutes,
-    format,
-    phaseFor,
-    display,
-    getTurnId,
-    applyManualFromCard,
-    handlePlayerInputTurn,
-    handleViewTurn,
-  };
-})();
-
-function TLInput(text) {
-    // input.js — display toggle + sleep + advances on input + expose prose time toggles on the card
-    if (typeof state !== 'object' || state === null) return { text };
-
-    TimeLib.init(state);
-    TimeLib.setRateFromCard(state, storyCards);
-    TimeLib.applyManualFromCard(state, info, storyCards);
-
-    // Read toggles from Time & Day card (defaults)
-    const readToggle = (label, def) => {
-        const list = Array.isArray(storyCards) ? storyCards : [];
-        const card = list.find(c => c && (c.key === 'timeAndDay' || c.keys === 'timeAndDay'));
-        let val = typeof state[label] === 'boolean' ? state[label] : def;
-        if (card) {
-            const raw = (typeof card.entry === 'string') ? card.entry : (typeof card.value === 'string' ? card.value : '');
-            const m = new RegExp(label + '\\s*:\\s*(true|false)', 'i').exec(raw);
-            if (m) val = m[1].toLowerCase() === 'true';
-        }
-        state[label] = val;
-        return val;
-    };
-    const showTime = readToggle('Display Time', true);
-    // New toggles for prose handling:
-    const lockProseTime = readToggle('Lock Prose Time', true);
-    const hideProseTime = readToggle('Hide Prose Time', false);
-
-    // Sleep command: "sleep till next morning/day"
-    try {
-        const sleepRe = /\b(sleep|nap|rest)\s+(till|until)\s+(next\s+)?(morning|day)\b/i;
-        const m = sleepRe.exec(text || '');
-        if (m) {
-            const beforeMin = state.clockMinutes;
-            const beforeDay = state.dayNumber;
-            state.dayNumber = (state.dayNumber || 1) + 1;
-            state.clockMinutes = 8 * 60; // 08:00
-            state._manualPending = true;
-            state._manualJump = { fromMin: beforeMin, fromDay: beforeDay, toMin: state.clockMinutes, toDay: state.dayNumber };
-
-            const stripped = (text || '').replace(sleepRe, '').trim();
-            text = stripped.length ? stripped : "You go to sleep.";
-        }
-    } catch { }
-
-    // Advance on player input
-    const res = TimeLib.handlePlayerInputTurn(state, info);
-    const d = TimeLib.display(state);
-
-    // Update cards (no debug)
-    state._cards = state._cards || {};
-    const ensure = (key, entry, type, title, notes) => {
-        state._cards[key] = state._cards[key] || { idx: -1, created: false };
-        const reg = state._cards[key];
-        const list = Array.isArray(storyCards) ? storyCards : null;
-        if (list && reg.idx === -1) {
-            for (let i = 0; i < list.length; i++) {
-                const c = list[i];
-                if (c && (c.key === key || c.keys === key)) { reg.idx = i; reg.created = true; break; }
-            }
-        }
-        if (reg.idx !== -1 && typeof updateStoryCard === 'function') {
-            try { updateStoryCard(reg.idx, key, entry, type, title, notes || ''); } catch { }
-        } else if (!reg.created && typeof addStoryCard === 'function') {
-            try { addStoryCard(key, entry, type, title, notes || ''); reg.created = true; } catch { }
-        }
-    };
-
-    ensure(
-        'timeAndDay',
-        `Time: ${d.timeStr} (${d.phase}), Day #: ${d.dayNum}
-Display Time: ${showTime ? 'true' : 'false'}
-Lock Prose Time: ${lockProseTime ? 'true' : 'false'}
-Hide Prose Time: ${hideProseTime ? 'true' : 'false'}`,
-        'Time and Day',
-        'Time and Day',
-        ''
-    );
-
-    ensure(
-        'actionRate',
-        `Minutes per action: ${state.minutesPerAction}`,
-        'Action Rate',
-        'Action Rate',
-        `Type "sleep till next morning" in a Do action → time jumps to 08:00am next day.`
-    );
-
-    const prefix = showTime ? `Time (${d.timeStr}) (${d.phase}), Day (${d.dayNum}) ` : '';
+  // ---- Public API (globals-fallback) ----
+  function TLInput(text,s=globalThis.state,i=globalThis.info,sc=globalThis.storyCards){
+    init(s);
+    const settings=readSettings(s,sc);
+    const sleepRes=maybeSleepCommand(s,text); text=sleepRes.text;
+    applyManualFromCard(s,sc);
+    handlePlayerInputTurn(s,i);
+    const d=display(s);
+    ensureTimeCard(s,sc,settings.show?'true':'false',settings.lockProse?'true':'false',settings.hideProse?'true':'false',s.minutesPerAction,d);
+    const prefix=settings.show?`Time (${d.timeStr}) (${d.phase}), Day (${d.dayNum}) `:'';
     return { text: prefix + text };
-}
-
-function TLContext(text) {
-    // context.js — header shown only when Display Time is true; primes retry/erase guard
-    if (typeof state !== 'object' || state === null) return { text };
-
-    TimeLib.init(state);
-    TimeLib.setRateFromCard(state, storyCards);
-    TimeLib.applyManualFromCard(state, info, storyCards);
-
-    // Prime suppression on rewind/erase (so next Continue won't advance)
-    try {
-        const tid = TimeLib.getTurnId(info, state);
-        const last = (state._time && typeof state._time.lastSeen === 'number') ? state._time.lastSeen : -1;
-        if (tid < last) {
-            state._suppressNextAdvance = true;
-            if (state._time && state._time.history) {
-                Object.keys(state._time.history).forEach(k => { if (+k > tid) delete state._time.history[k]; });
-            }
-            // Do not set lastSeen here; Output will record the actual snapshot it shows
-        }
-    } catch { }
-
-    // Display toggle
-    const readDisplayToggle = () => {
-        const list = Array.isArray(storyCards) ? storyCards : [];
-        const card = list.find(c => c && (c.key === 'timeAndDay' || c.keys === 'timeAndDay'));
-        let show = typeof state.displayTimeEnabled === 'boolean' ? state.displayTimeEnabled : true;
-        if (card) {
-            const raw = (typeof card.entry === 'string') ? card.entry : (typeof card.value === 'string' ? card.value : '');
-            const m = /Display\s*Time:\s*(true|false)/i.exec(raw);
-            if (m) show = m[1].toLowerCase() === 'true';
-        }
-        state.displayTimeEnabled = show;
-        return show;
-    };
-    const showTime = readDisplayToggle();
-
-    const d = TimeLib.display(state);
-    if (!showTime) return { text };
-    return { text: `[Time: ${d.timeStr} (${d.phase}), Day #: ${d.dayNum}] ` + text };
-}
-
-function TLOutput(text) {
-    // output.js — Continue can advance; Retry/Erase never advance;
-    // only narrate forward manual edits when visible; lock/hide time in prose
-    if (typeof state !== 'object' || state === null) return { text };
-
-    TimeLib.init(state);
-    TimeLib.setRateFromCard(state, storyCards);
-    TimeLib.applyManualFromCard(state, info, storyCards);
-
-    const res = TimeLib.handleViewTurn(state, info);
-    const d = TimeLib.display(state);
-
-    // Read toggles from card (defaults)
-    const readToggle = (label, def) => {
-        const list = Array.isArray(storyCards) ? storyCards : [];
-        const card = list.find(c => c && (c.key === 'timeAndDay' || c.keys === 'timeAndDay'));
-        let val = typeof state[label] === 'boolean' ? state[label] : def;
-        if (card) {
-            const raw = (typeof card.entry === 'string') ? card.entry : (typeof card.value === 'string' ? card.value : '');
-            const m = new RegExp(label + '\\s*:\\s*(true|false)', 'i').exec(raw);
-            if (m) val = m[1].toLowerCase() === 'true';
-        }
-        state[label] = val;
-        return val;
-    };
-    const showTime = readToggle('Display Time', true);
-    const lockProse = readToggle('Lock Prose Time', true);
-    const hideProse = readToggle('Hide Prose Time', false);
-
-    // Build canonical time strings
-    const hhmm = d.timeStr; // "HH:MM" 24h
-    const [H, M] = hhmm.split(':').map(n => parseInt(n, 10));
-    const hour12 = ((H % 12) || 12);
-    const ampm = H >= 12 ? 'pm' : 'am';
-    const canonical12 = `${hour12}:${String(M).padStart(2, '0')}${ampm}`;
-
-    // Optionally sanitize AI prose for time mentions before we add our footer/narration
-    if (hideProse || lockProse) {
-        // 12-hour like "4:28pm" or "04:28 pm"
-        const re12 = /\b(0?[1-9]|1[0-2]):[0-5]\d\s?(?:am|pm)\b/gi;
-        // 24-hour like "16:28"
-        const re24 = /\b([01]?\d|2[0-3]):[0-5]\d\b/g;
-
-        if (hideProse) {
-            text = text.replace(re12, '').replace(re24, '');
-            // collapse double spaces after removals
-            text = text.replace(/\s{2,}/g, ' ');
-        } else if (lockProse) {
-            text = text.replace(re12, canonical12).replace(re24, hhmm);
-        }
+  }
+  function TLContext(text,s=globalThis.state,i=globalThis.info,sc=globalThis.storyCards){
+    init(s); const settings=readSettings(s,sc); applyManualFromCard(s,sc);
+    try{ const tid=getTurnId(i,s), last=(s._dtt&&typeof s._dtt.lastSeen==='number')?s._dtt.lastSeen:-1;
+      if(tid<last){ s._suppressNextAdvance=true; if(s._dtt&&s._dtt.history){ Object.keys(s._dtt.history).forEach(k=>{if(+k>tid) delete s._dtt.history[k];}); } }
+    }catch{}
+    const d=display(s); ensureTimeCard(s,sc,settings.show?'true':'false',settings.lockProse?'true':'false',settings.hideProse?'true':'false',s.minutesPerAction,d);
+    return { text };
+  }
+  function TLOutput(text,s=globalThis.state,i=globalThis.info,sc=globalThis.storyCards){
+    init(s); const settings=readSettings(s,sc); applyManualFromCard(s,sc);
+    handleViewTurn(s,i); const d=display(s);
+    if(settings.hideProseTime||settings.lockProseTime){
+      const hhmm=d.timeStr, [H,M]=hhmm.split(':').map(n=>+n), canon12=to12h(H,M);
+      const re12=/\b(0?[1-9]|1[0-2]):[0-5]\d\s?(?:am|pm)\b/gi, re24=/\b([01]?\d|2[0-3]):[0-5]\d\b/g;
+      if(settings.hideProseTime){ text=text.replace(re12,'').replace(re24,'').replace(/\s{2,}/g,' '); }
+      else if(settings.lockProseTime){ text=text.replace(re12,canon12).replace(re24,hhmm); }
     }
+    ensureTimeCard(s,sc,settings.show?'true':'false',settings.lockProse?'true':'false',settings.hideProse?'true':'false',s.minutesPerAction,d);
+    return { text };
+  }
 
-    // Update cards (no debug)
-    state._cards = state._cards || {};
-    const ensure = (key, entry, type, title, notes) => {
-        state._cards[key] = state._cards[key] || { idx: -1, created: false };
-        const reg = state._cards[key];
-        const list = Array.isArray(storyCards) ? storyCards : null;
-        if (list && reg.idx === -1) {
-            for (let i = 0; i < list.length; i++) { const c = list[i]; if (c && (c.key === key || c.keys === key)) { reg.idx = i; reg.created = true; break; } }
-        }
-        if (reg.idx !== -1 && typeof updateStoryCard === 'function') { try { updateStoryCard(reg.idx, key, entry, type, title, notes || ''); } catch { } }
-        else if (!reg.created && typeof addStoryCard === 'function') { try { addStoryCard(key, entry, type, title, notes || ''); reg.created = true; } catch { } }
-    };
-
-    ensure(
-        'timeAndDay',
-        `Time: ${d.timeStr} (${d.phase}), Day #: ${d.dayNum}
-Display Time: ${showTime ? 'true' : 'false'}
-Lock Prose Time: ${lockProse ? 'true' : 'false'}
-Hide Prose Time: ${hideProse ? 'true' : 'false'}`,
-        'Time and Day',
-        'Time and Day',
-        ''
-    );
-    ensure(
-        'actionRate',
-        `Minutes per action: ${state.minutesPerAction}`,
-        'Action Rate',
-        'Action Rate',
-        `Type "sleep till next morning" in a Do action → time jumps to 08:00am next day.`
-    );
-
-    // Narrate ONLY forward manual edits (no rewinds), only if display is ON
-    let narration = '';
-    if (showTime && res && res.reason === 'manual' && res.jump) {
-        const { fromMin, toMin, fromDay, toDay } = res.jump;
-        const MINUTES_PER_DAY = 1440;
-        let delta = (toDay - fromDay) * MINUTES_PER_DAY + (toMin - fromMin);
-        while (delta < 0) delta += MINUTES_PER_DAY; // normalize to forward movement
-
-        if (delta > 0) {
-            const fmt = (mins0) => {
-                let mins = Math.abs(mins0), days = Math.floor(mins / MINUTES_PER_DAY); mins %= MINUTES_PER_DAY;
-                const hrs = Math.floor(mins / 60), mns = mins % 60, parts = [];
-                if (days) parts.push(`${days} day${days === 1 ? '' : 's'}`);
-                if (hrs) parts.push(`${hrs} hour${hrs === 1 ? '' : 's'}`);
-                if (mns) parts.push(`${mns} minute${mns === 1 ? '' : 's'}`);
-                return parts.join(' ') || '0 minutes';
-            };
-            narration = `\n\n⏳ ${fmt(delta)} have passed.`;
-        }
-    }
-
-    const footer = showTime ? `\n\n[Time: ${d.timeStr} (${d.phase}), Day #: ${d.dayNum}]` : '';
-    return { text: `${text}${narration}${footer}` };
-}
+  globalThis.TLInput=TLInput; globalThis.TLContext=TLContext; globalThis.TLOutput=TLOutput;
+  globalThis.DTT={TLInput,TLContext,TLOutput};
+})();

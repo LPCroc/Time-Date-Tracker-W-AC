@@ -1,4 +1,2 @@
-const modifier = (text) => {
-    return TLContext(text);
-};
+const modifier = (text) => TLContext(text);
 modifier(text);
