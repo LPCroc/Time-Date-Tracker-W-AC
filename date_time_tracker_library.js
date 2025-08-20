@@ -248,7 +248,7 @@ function getTextLink(str) {
     return str[0] + str[1] + str[str.length - 2] + str[str.length - 1]
 }
 function getIsRetry(text) {
-    if (cachedHash === undefined || cachedCharLink === undefined) return false;
+    if (cachedHash === undefined || cachedTextLink === undefined) return false;
     const hash = hash(text);
     const link = getTextLink(text);
     return (hash === cachedHash && link === cachedTextLink);
