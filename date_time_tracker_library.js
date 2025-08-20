@@ -235,7 +235,7 @@ Minutes per action: ${rate}`;
 })();
 function cacheContextVAL(text) {
     cachedHash = hash(text);
-    cachedCharLink = getTextLink(text);
+    cachedTextLink = getTextLink(text);
 })
 function hash(str) {  //credits to lewdleah for of hash function
     let hash = 0;
