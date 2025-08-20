@@ -12,6 +12,9 @@
     if (typeof state.minutesPerAction !== 'number') state.minutesPerAction = DEFAULT_RATE_MIN;
     if (!state._time) state._time = { history:{}, lastSeen:-1, lastInputSeen:-1 };
     if (typeof state._suppressNextAdvance !== 'boolean') state._suppressNextAdvance = false;
+    if (cachedHash === undefined) { cachedHash = '' }
+    if (cachedTextLink === undefined) { cachedCharValidator = '' }
+    if (isRetry === undefined) { isRetry = false }
   }
 
   function setRateFromCard(state, storyCards) {
@@ -276,6 +279,8 @@ Hide Prose Time: ${hideProseTime ? 'true' : 'false'}`,
 }
 
 function TLContext(text) {
+    isRetry = getIsRetry(text);
+    cacheContextVAL(text);
     // context.js — header shown only when Display Time is true; primes retry/erase guard
     if (typeof state !== 'object' || state === null) return { text };
 
@@ -422,4 +427,25 @@ Hide Prose Time: ${hideProse ? 'true' : 'false'}`,
 
     const footer = showTime ? `\n\n[Time: ${d.timeStr} (${d.phase}), Day #: ${d.dayNum}]` : '';
     return { text: `${text}${narration}${footer}` };
+}
+function cacheContextVAL(text) {
+    cachedHash = hash(text);
+    cachedCharLink = getTextLink(text);
+})
+function hash(str) {  //credits to lewdleah for of hash function
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+        hash = ((31 * hash) + str.charCodeAt(i)) % 65536;
+    }
+    return hash.toString(36);
+}
+function getTextLink(str) {
+    return str[0] + str[1] + str[str.length - 2] + str[str.length - 1]
+}
+function getIsRetry(text) {
+    if (cachedHash === undefined || cachedCharLink === undefined) return false;
+    const hash = hash(text);
+    const link = getTextLink(text);
+    return (hash === cachedHash && link === cachedCharLink);
+
 }
