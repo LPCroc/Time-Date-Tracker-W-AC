@@ -43,7 +43,7 @@
     if(!state._dtt) state._dtt={history:{},lastSeen:-1,lastInputSeen:-1};
     if (typeof state._suppressNextAdvance !== 'boolean') state._suppressNextAdvance = false;
     if (cachedHash === undefined) { cachedHash = '' }
-    if (cachedTextLink === undefined) { cachedCharValidator = '' }
+    if (cachedTextLink === undefined) { cachedTextLink = '' }
     if (isRetry === undefined) { isRetry = false }
   }
   function getTurnId(info,state){
@@ -251,5 +251,5 @@ function getIsRetry(text) {
     if (cachedHash === undefined || cachedCharLink === undefined) return false;
     const hash = hash(text);
     const link = getTextLink(text);
-    return (hash === cachedHash && link === cachedCharLink);
+    return (hash === cachedHash && link === cachedTextLink);
 }
