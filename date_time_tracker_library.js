@@ -249,7 +249,7 @@ function getTextLink(str) {
 }
 function getIsRetry(text) {
     if (cachedHash === undefined || cachedTextLink === undefined) return false;
-    const hash = hash(text);
-    const link = getTextLink(text);
-    return (hash === cachedHash && link === cachedTextLink);
+    let Chash = hash(text);
+    let Clink = getTextLink(text);
+    return (Chash === cachedHash && Clink === cachedTextLink);
 }
