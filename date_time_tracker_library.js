@@ -41,7 +41,10 @@
     if(typeof state.dayNumber!=='number') state.dayNumber=1;
     if(typeof state.minutesPerAction!=='number') state.minutesPerAction=DEFAULT_RATE_MIN;
     if(!state._dtt) state._dtt={history:{},lastSeen:-1,lastInputSeen:-1};
-    if(typeof state._suppressNextAdvance!=='boolean') state._suppressNextAdvance=false;
+    if (typeof state._suppressNextAdvance !== 'boolean') state._suppressNextAdvance = false;
+    if (cachedHash === undefined) { cachedHash = '' }
+    if (cachedTextLink === undefined) { cachedTextLink = '' }
+    if (isRetry === undefined) { isRetry = false }
   }
   function getTurnId(info,state){
     if(info&&typeof info.actionCount==='number') return info.actionCount;
@@ -192,7 +195,9 @@ Minutes per action: ${rate}`;
     return { text };
   }
 
-  function TLContext(text, s=globalThis.state, i=globalThis.info, sc=globalThis.storyCards){
+   function TLContext(text, s = globalThis.state, i = globalThis.info, sc = globalThis.storyCards) {
+    isRetry = getIsRetry(text);
+    cacheContextVAL(text);
     init(s);
     const settings=readSettings(s,sc);
     applyManualFromCard(s,sc);
@@ -228,3 +233,23 @@ Minutes per action: ${rate}`;
   globalThis.TLOutput  = TLOutput;
   globalThis.DTT = { VERSION, TLInput, TLContext, TLOutput };
 })();
+function cacheContextVAL(text) {
+    cachedHash = hash(text);
+    cachedTextLink = getTextLink(text);
+})
+function hash(str) {  //credits to lewdleah for of hash function
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+        hash = ((31 * hash) + str.charCodeAt(i)) % 65536;
+    }
+    return hash.toString(36);
+}
+function getTextLink(str) {
+    return str[0] + str[1] + str[str.length - 2] + str[str.length - 1]
+}
+function getIsRetry(text) {
+    if (cachedHash === undefined || cachedTextLink === undefined) return false;
+    let Chash = hash(text);
+    let Clink = getTextLink(text);
+    return (Chash === cachedHash && Clink === cachedTextLink);
+}
