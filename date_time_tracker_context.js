@@ -1,5 +1,9 @@
+
+// DTT 1.4.8
+// Context modifier below:
 const modifier = (text) => {
-  if (typeof TLContext === 'function') return TLContext(text);
-  return { text };
+    text = TimeAndDay.Hooks.onContext(text);
+    [text, stop] = AutoCards("context", text, stop);
+    return { text, stop };
 };
 modifier(text);
