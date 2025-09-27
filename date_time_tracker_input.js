@@ -1,6 +1,9 @@
+
+// DTT 1.4.8
+// Input modifier below:
 const modifier = (text) => {
-  if (typeof TLInput === 'function') return TLInput(text);
-  // graceful fallback so the run doesn’t crash if the library fails to load
-  return { text };
+    text = TimeAndDay.Hooks.onInput(text);
+    text = AutoCards("input", text);
+    return { text };
 };
 modifier(text);
