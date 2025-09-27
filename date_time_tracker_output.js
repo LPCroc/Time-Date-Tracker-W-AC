@@ -1,5 +1,9 @@
+
+// DTT 1.4.8
+// Output modifier below:
 const modifier = (text) => {
-  if (typeof TLOutput === 'function') return TLOutput(text);
-  return { text };
+    text = TimeAndDay.Hooks.onOutput(text);
+    text = AutoCards("output", text);
+    return { text };
 };
 modifier(text);
